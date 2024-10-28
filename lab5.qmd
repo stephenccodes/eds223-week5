@@ -1,0 +1,187 @@
+---
+title: "week5 lab"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(sf) # vector handling
+library(terra) # raster handling
+library(tidyverse)
+library(tmap) # map making
+library(spData) # spatial data
+library(spDataLarge) # spatial data
+library(viridisLite)
+```
+```{r}
+# Load raster dataset
+elevation <- rast(system.file("raster/srtm.tif", package = "spDataLarge"))
+
+# Load vector data
+boundary <- read_sf(system.file("vector/zion.gpkg", package = "spDataLarge"))
+
+```
+
+```{r}
+if (crs(elevation) == crs(boundary)){  print("CRS match!")
+} else {
+  warning("update CRS to match")
+  boundary <- st_transform(boundary, st_crs(elevation))
+}
+```
+
+```{r}
+tm_shape(elevation) +
+  tm_raster(title = "Elevation(meters)") +
+  tm_shape(boundary) +
+  tm_borders(lwd = 1) +
+  tm_layout(legend.outside = TRUE)
+```
+
+```{r}
+# Crop raster to extent of vector object
+elevation_cropped <- terra::crop(elevation, boundary)
+```
+
+```{r}
+tm_shape(elevation_cropped) +
+  tm_raster(title = "Elevation(meters)") +
+  tm_shape(boundary) +
+  tm_borders(lwd = 1) +
+  tm_layout(legend.outside = TRUE)
+```
+
+```{r}
+# Mask our raster based on the vector object
+# Convert the cells outside of the park to NA
+elevation_masked <- terra::mask(elevation_cropped, boundary)
+```
+
+```{r}
+tm_shape(elevation_masked) +
+  tm_raster(title = "Elevation(meters)") +
+  tm_shape(boundary) +
+  tm_borders(lwd = 1) +
+  tm_layout(legend.outside = TRUE)
+```
+
+```{r}
+# Mask raster based on vector (inverse of what we just didi)
+# Convert cells inside of the park to NA
+
+elevation_inverse_masked <- terra::mask(elevation_cropped, boundary, inverse = TRUE)
+
+```
+
+```{r}
+tm_shape(elevation_inverse_masked) +
+  tm_raster(title = "Elevation(meters)") +
+  tm_shape(boundary) +
+  tm_borders(lwd = 1) +
+  tm_layout(legend.outside = TRUE)
+```
+
+## Raster vecotorization
+```{r}
+# Start with all raster data for the park
+# Find all data with certain elevation
+# Turn that elevation shape into a vector (polygons)
+
+# Masking to cells inside of park
+elevation_inside <- mask(elevation_cropped, boundary)
+
+# Create a mask based on value of cells
+elevation_masked <- elevation_inside
+
+# Directly reassign layer namees
+names(elevation) <- "elevation"
+
+# Select only the cells with a value greater than 2000
+elevation_masked[elevation_masked < 2000] <- NA
+
+tm_shape(elevation_masked) +
+  tm_raster() +
+  tm_layout(legend.outside = TRUE)
+```
+
+```{r}
+
+# Convert the new raster data into polygons
+elevation_masked_poly <- terra::as.polygons(elevation_masked) %>%
+  st_as_sf()
+
+tm_shape(elevation_masked_poly) +
+  tm_polygons() +
+  tm_layout(legend.outside = TRUE)
+
+```
+
+
+
+# Extracting values from point in a raster dataset
+
+```{r}
+data("zion_points", package = "spDataLarge")
+crs(zion_points) == crs(elevation)
+
+zion_ppoints <- st_transform(zion_points, crs = st_crs(elevation))
+```
+
+```{r}
+tm_shape(elevation) +
+  tm_raster() +
+  tm_shape(boundary)+
+  tm_borders() +
+  tm_shape(zion_points) +
+  tm_symbols()
+
+pts_elevation <- terra::extract(elevation, zion_points)
+zion_points <- cbind(zion_points, pts_elevation)
+```
+
+# Extract elevation form a transect of the map
+
+```{r}
+zion_transect <- cbind(c(-133.2, -112.9),
+                       c(37.45, 37.2)) %>%
+  st_linestring() %>%
+  st_sfc(crs = crs(elevation)) %>%
+  st_sf(geometry = .)
+
+tm_shape(elevation) +
+  tm_raster() +
+  tm_shape(zion_transect) +
+  tm_lines()
+
+zion_transect$id = 1:nrow(zion_transect)
+zion_transect <- st_segmentize(zion_transect, dfMaxLength = 250)
+zion_transect <- st_cast(zion_transect, "POINT")
+
+tm_shape(elevation) +
+  tm_raster() +
+  tm_shape(zion_transect) +
+  tm_symbols()
+
+zion_transect <- zion_transect %>%
+  group_by(id) %>%
+  mutate(dist = st_distance(geometry)[,1])
+
+transect <- terra::extract(elevation, zion_transect)
+zion_transect <- cbind(zion_transect, transect)
+
+library(units)
+
+
+zion_transect <- zion_transect %>%
+  filter(!is.na(elevation))
+
+ggplot(zion_transect, aes(x = ID, y = elevation)) +
+  geom_point()
+```
+
+
+
+
+
